@@ -11,9 +11,9 @@ CORS(app)  # Enable CORS for Flutter
 # ✅ Set OpenAI API key here
 import os
 
-openApiKey = os.getenv("OPENAI_API_KEY")
+openai_api_key = os.getenv("OPENAI_API_KEY")  # ✅ Fixed variable name
 
-client = OpenAI(api_key = openApiKey)
+client = OpenAI(api_key=openai_api_key)  # ✅ Fixed variable name
 
 
 # Function to extract YouTube video ID
