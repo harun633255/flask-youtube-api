@@ -11,6 +11,7 @@ import random
 app = Flask(__name__)
 CORS(app)
 
+# Updated for Azure deployment
 # ✅ Get OpenAI API key from environment variables (Render environment)
 import os
 openai_api_key = os.environ.get("OPENAI_API_KEY")
@@ -271,4 +272,4 @@ if __name__ == '__main__':
     
     # Use environment port or default to 5000
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)  # Set debug=False for production
+    app.run(host='0.0.0.0', port=port, debug=False)  # Set debug=False for production# Updated for deployment
