@@ -1,3 +1,5 @@
+import os
+import random
 from flask import Flask, request, jsonify
 from youtube_transcript_api import YouTubeTranscriptApi
 import re
@@ -5,24 +7,37 @@ import json
 from flask_cors import CORS
 from openai import OpenAI
 import requests
-import time
-import random
 
 app = Flask(__name__)
 CORS(app)
 
-# Updated for Azure deployment
-# ✅ Get OpenAI API key from environment variables (Render environment)
-import os
+# Environment setup
 openai_api_key = os.environ.get("OPENAI_API_KEY")
-
 if not openai_api_key:
     raise ValueError("OPENAI_API_KEY environment variable not set!")
 
-# Initialize OpenAI client
 client = OpenAI(api_key=openai_api_key)
 
-# Function to extract YouTube video ID
+# WebShare proxy configuration from your dashboard
+WEBSHARE_PROXIES = [
+    {"ip": "23.95.150.145", "port": 6114, "username": "dofmcoom", "password": "k8gjbcts7ekn"},
+    {"ip": "198.23.239.134", "port": 6540, "username": "dofmcoom", "password": "k8gjbcts7ekn"},
+    {"ip": "45.38.107.97", "port": 6014, "username": "dofmcoom", "password": "k8gjbcts7ekn"},
+    {"ip": "107.172.163.27", "port": 6543, "username": "dofmcoom", "password": "k8gjbcts7ekn"},
+    {"ip": "64.137.96.74", "port": 6641, "username": "dofmcoom", "password": "k8gjbcts7ekn"},
+    {"ip": "45.43.186.39", "port": 6257, "username": "dofmcoom", "password": "k8gjbcts7ekn"},
+]
+
+def get_random_proxy():
+    """Get a random working proxy from WebShare"""
+    proxy = random.choice(WEBSHARE_PROXIES)
+    proxy_url = f"http://{proxy['username']}:{proxy['password']}@{proxy['ip']}:{proxy['port']}"
+    
+    return {
+        'http': proxy_url,
+        'https': proxy_url
+    }
+
 def get_video_id(url):
     patterns = [
         r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})",
@@ -35,74 +50,6 @@ def get_video_id(url):
             return match.group(1)
     return None
 
-def get_transcript_with_retry(video_id, max_retries=3):
-    """
-    Enhanced transcript fetching with multiple retry strategies
-    """
-    
-    # Different user agents to rotate
-    user_agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0'
-    ]
-    
-    # Try different language combinations
-    language_combinations = [
-        ['en'],
-        ['en-US'],
-        ['en', 'en-US'],
-        ['en', 'bn', 'hi'],
-        None  # Let YouTube decide
-    ]
-    
-    for attempt in range(max_retries):
-        try:
-            print(f"Attempt {attempt + 1} to fetch transcript for video {video_id}")
-            
-            # Add random delay to avoid rate limiting
-            if attempt > 0:
-                delay = random.uniform(2, 5)
-                print(f"Waiting {delay:.2f} seconds before retry...")
-                time.sleep(delay)
-            
-            # Try different language combinations
-            for lang_combo in language_combinations:
-                try:
-                    if lang_combo:
-                        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=lang_combo)
-                    else:
-                        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-                    
-                    print(f"Successfully fetched transcript with languages: {lang_combo}")
-                    return transcript
-                    
-                except Exception as lang_error:
-                    print(f"Language combination {lang_combo} failed: {str(lang_error)}")
-                    continue
-            
-            # If all language combinations failed, try the list method
-            try:
-                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                for transcript_obj in transcript_list:
-                    try:
-                        transcript = transcript_obj.fetch()
-                        print("Successfully fetched transcript using list method")
-                        return transcript
-                    except:
-                        continue
-            except Exception as list_error:
-                print(f"List method failed: {str(list_error)}")
-                
-        except Exception as e:
-            print(f"Attempt {attempt + 1} failed: {str(e)}")
-            if attempt == max_retries - 1:
-                raise Exception(f"All {max_retries} attempts failed. Last error: {str(e)}")
-    
-    raise Exception("Failed to fetch transcript after all attempts")
-
-# Split long transcript into chunks
 def chunk_text(text, max_chunk_size=3000):
     words = text.split()
     chunks = []
@@ -122,6 +69,104 @@ def chunk_text(text, max_chunk_size=3000):
         chunks.append(" ".join(current_chunk))
 
     return chunks
+
+def get_transcript_with_webshare_proxy(video_id, max_retries=3):
+    """
+    Fetch transcript using WebShare proxies with fallback
+    """
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"Attempt {attempt + 1}: Trying with WebShare proxy")
+            
+            # Get a random proxy
+            proxy_dict = get_random_proxy()
+            print(f"Using proxy: {proxy_dict['http'].split('@')[1]}")  # Log proxy IP (without credentials)
+            
+            # Method 1: Direct proxy approach using requests
+            try:
+                # Build the transcript URL manually
+                transcript_url = f"https://www.youtube.com/api/timedtext?v={video_id}&lang=en&fmt=json3"
+                
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                }
+                
+                response = requests.get(
+                    transcript_url, 
+                    headers=headers, 
+                    proxies=proxy_dict, 
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    content = response.text
+                    if content and len(content) > 100:
+                        # Parse YouTube's JSON3 format
+                        transcript_data = json.loads(content)
+                        if 'events' in transcript_data:
+                            transcript = []
+                            for event in transcript_data['events']:
+                                if 'segs' in event:
+                                    text_parts = []
+                                    for seg in event['segs']:
+                                        if 'utf8' in seg:
+                                            text_parts.append(seg['utf8'])
+                                    if text_parts:
+                                        transcript.append({
+                                            'text': ''.join(text_parts),
+                                            'start': event.get('tStartMs', 0) / 1000.0,
+                                            'duration': event.get('dDurationMs', 0) / 1000.0
+                                        })
+                            
+                            if transcript:
+                                print(f"Successfully fetched transcript via direct API with proxy")
+                                return transcript
+                
+            except Exception as e:
+                print(f"Direct API method failed: {str(e)}")
+            
+            # Method 2: YouTube Transcript API with proxy (if available)
+            try:
+                # Note: youtube-transcript-api doesn't directly support requests-style proxies
+                # This is a workaround by monkey-patching
+                import youtube_transcript_api._api
+                original_get = requests.Session.get
+                
+                def proxied_get(self, *args, **kwargs):
+                    kwargs['proxies'] = proxy_dict
+                    return original_get(self, *args, **kwargs)
+                
+                # Temporarily patch the requests
+                requests.Session.get = proxied_get
+                
+                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'en-US'])
+                
+                # Restore original method
+                requests.Session.get = original_get
+                
+                print(f"Successfully fetched transcript via YouTube Transcript API with proxy")
+                return transcript
+                
+            except Exception as e:
+                print(f"YouTube Transcript API with proxy failed: {str(e)}")
+                # Restore original method just in case
+                requests.Session.get = original_get
+                
+        except Exception as e:
+            print(f"Attempt {attempt + 1} failed: {str(e)}")
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(2)  # Wait before retry
+                
+    # Final fallback: Try without proxy
+    try:
+        print("Trying final fallback without proxy")
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'en-US'])
+        print("Fallback without proxy succeeded")
+        return transcript
+    except Exception as e:
+        raise Exception(f"All methods failed including non-proxy fallback. Last error: {str(e)}")
 
 @app.route('/generate_qa', methods=['POST'])
 def generate_qa():
@@ -145,27 +190,28 @@ def generate_qa():
 
         print(f"Processing video ID: {video_id}")
 
-        # Get transcript with enhanced retry logic
+        # Get transcript with WebShare proxy
         try:
-            transcript = get_transcript_with_retry(video_id)
+            transcript = get_transcript_with_webshare_proxy(video_id)
+            print(f"Successfully fetched transcript with {len(transcript)} entries")
+            
         except Exception as e:
             print(f"Transcript fetching failed: {str(e)}")
             return jsonify({
                 'error': f"Could not fetch transcript: {str(e)}",
-                'suggestion': 'This video might not have captions available, or YouTube is blocking the request. Try a different video with captions enabled.'
+                'suggestion': 'Video might not have captions, or all proxy methods failed. Try a different video.',
+                'video_id': video_id,
+                'proxy_status': 'WebShare proxies attempted'
             }), 500
 
         # Process transcript
-        if hasattr(transcript[0], 'text'):
-            full_text = " ".join([entry.text for entry in transcript])
-        else:
-            full_text = " ".join([entry.get('text', '') for entry in transcript])
+        full_text = " ".join([entry.get('text', '') for entry in transcript])
 
         if len(full_text.strip()) < 100:
             return jsonify({'error': 'Transcript too short to generate meaningful questions'}), 400
 
         chunks = chunk_text(full_text)
-        text_to_process = chunks[0]  # Use first chunk for processing
+        text_to_process = chunks[0]
 
         print(f"Processing text chunk of length: {len(text_to_process)}")
 
@@ -189,7 +235,7 @@ Strict Format (return only this JSON structure):
 Video Transcript:
 {text_to_process}"""
 
-        # Call OpenAI API with error handling
+        # Call OpenAI API
         try:
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -202,19 +248,12 @@ Video Transcript:
             )
 
             result = response.choices[0].message.content.strip()
-            print(f"OpenAI response length: {len(result)}")
-
-            # Clean the result to ensure it's valid JSON
             result = result.replace('```json', '').replace('```', '').strip()
 
-            # Validate JSON
             json_result = json.loads(result)
             
-            if not isinstance(json_result, list):
+            if not isinstance(json_result, list) or len(json_result) == 0:
                 return jsonify({'error': 'AI returned invalid response format'}), 500
-            
-            if len(json_result) == 0:
-                return jsonify({'error': 'No questions generated'}), 500
 
             print(f"Successfully generated {len(json_result)} Q&A pairs")
             
@@ -222,15 +261,13 @@ Video Transcript:
                 'result': result, 
                 'count': len(json_result),
                 'video_id': video_id,
-                'transcript_length': len(full_text)
+                'transcript_length': len(full_text),
+                'proxy_method': 'WebShare proxies'
             })
 
         except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {str(e)}")
             return jsonify({'error': 'AI returned invalid JSON format', 'details': str(e)}), 500
-        
         except Exception as e:
-            print(f"OpenAI API error: {str(e)}")
             return jsonify({'error': f'OpenAI API error: {str(e)}'}), 500
 
     except Exception as e:
@@ -242,20 +279,56 @@ def health_check():
     return jsonify({
         'status': 'Server is running',
         'openai_configured': bool(openai_api_key),
-        'environment': 'production' if os.environ.get('RENDER') else 'development'
+        'proxy_configured': True,
+        'proxy_count': len(WEBSHARE_PROXIES),
+        'proxy_provider': 'WebShare'
     })
+
+@app.route('/test_proxy', methods=['GET'])
+def test_proxy():
+    """Test WebShare proxy connection"""
+    try:
+        proxy_dict = get_random_proxy()
+        
+        # Test the proxy with a simple request
+        response = requests.get(
+            'https://httpbin.org/ip', 
+            proxies=proxy_dict, 
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            ip_info = response.json()
+            return jsonify({
+                'success': True,
+                'proxy_ip': ip_info.get('origin'),
+                'message': 'WebShare proxy is working!',
+                'proxy_used': proxy_dict['http'].split('@')[1]  # Show IP without credentials
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Proxy returned status code: {response.status_code}'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Proxy test failed: {str(e)}'
+        }), 500
 
 @app.route('/test_transcript/<video_id>', methods=['GET'])
 def test_transcript(video_id):
-    """Test endpoint to check if transcript fetching works for a specific video"""
+    """Test transcript fetching with WebShare proxy"""
     try:
-        transcript = get_transcript_with_retry(video_id)
+        transcript = get_transcript_with_webshare_proxy(video_id)
         full_text = " ".join([entry.get('text', '') for entry in transcript])
         return jsonify({
             'success': True,
             'video_id': video_id,
             'transcript_length': len(full_text),
-            'preview': full_text[:200] + "..." if len(full_text) > 200 else full_text
+            'preview': full_text[:300] + "..." if len(full_text) > 300 else full_text,
+            'method_used': 'WebShare proxies'
         })
     except Exception as e:
         return jsonify({
@@ -270,6 +343,6 @@ if __name__ == '__main__':
     else:
         print("✅ OpenAI API key configured")
     
-    # Use environment port or default to 5000
+    print(f"✅ WebShare proxies configured: {len(WEBSHARE_PROXIES)} proxies available")
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)  # Set debug=False for production# Updated for deployment
+    app.run(host='0.0.0.0', port=port, debug=False)
